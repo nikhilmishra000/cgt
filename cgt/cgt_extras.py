@@ -3,7 +3,7 @@ import numpy as np
 import cgt
 from cgt import nn
 import types
-import cPickle as pickle
+import dill as pickle
 from matplotlib import pyplot as plt
 
 def make_variable(name, shape):
@@ -66,9 +66,15 @@ class Params(object):
         return theta
 
 class Solver(struct):
+    plot_func = None
+    lr_decay = 1
+    lr_step = 10000
+    plot_step = 100
+    fname = None
+    
     def __init__(self, args):
         struct.__init__(self, **args)
-        if self.plot_step:
+        if self.plot_func:
             self.plot = plt.figure(); plt.ion(); plt.show(0)
             
     def initialize(self, model):
@@ -85,15 +91,16 @@ class Solver(struct):
             self.alpha = max(self.alpha, self.min_alpha)
             
     def draw(self):
-        if self.plot_step and self._iter % self.plot_step == 0:
-            self.plot.clear()
+        if self._iter % self.plot_step == 0:
             self.loss[-1] = np.mean(self.loss[-1])
-            self.plot_func(range(0,self._iter,self.plot_step), self.loss)
             self.loss.append([])
-            plt.draw()
+            if self.plot_func:
+                self.plot.clear()
+                self.plot_func(range(0,self._iter,self.plot_step), self.loss)
+                plt.draw()
 
     def snapshot(self):
-        if self._iter % self.snap_step == 0:
+        if self.fname and self._iter % self.snap_step == 0:
             self.model.dump(self.fname.format(self._iter),
                             {k:v for k,v in self.items() if type(v) != types.FunctionType and not isinstance(v, Model)})
         
