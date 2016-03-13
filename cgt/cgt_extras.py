@@ -65,8 +65,24 @@ class Params(object):
         assert theta.size == n
         return theta
 
+
+def backtrack(func, x, dx, f, g, alpha=0.25, beta=0.9, lb=1e-6, ub=1):
+    t = ub
+    while func(x + t*dx) >= f + t*alpha*g.dot(dx):
+        t *= beta
+        if t < lb:
+            print "Warning: backtracking hit lower bound of {0}".format(lb)
+            break;
+    return beta
+    
 class Solver(struct):
     def __init__(self, args):
+        """
+        @param args, a dict containing:
+        paramters: alpha, momentum, lr_decay, lr_step, min_alpha
+        rmsp: gamma
+        etc: plot_step, plot_func, fname, snapstep
+        """
         struct.__init__(self, **args)
         if self.plot_step:
             self.plot = plt.figure(); plt.ion(); plt.show(0)
@@ -93,22 +109,30 @@ class Solver(struct):
             plt.draw()
 
     def snapshot(self):
-        if self._iter % self.snap_step == 0:
+        if len(self.fname) > 0 and self._iter % self.snap_step == 0:
             self.model.dump(self.fname.format(self._iter),
                             {k:v for k,v in self.items() if type(v) != types.FunctionType and not isinstance(v, Model)})
         
-    def update(self, loss, grad, acc):
+    def update(self, loss, grad, acc, disp):
         if self.check_nan(loss, grad):
-            print "something is nan, skipping..."
-            return np.zeros_like(self.dtheta)
-        
+            if self.pass_nan:
+                print "something is nan, skipping..."
+                return np.zeros_like(self.dtheta),False
+            else:
+                return np.zeros_like(self.dtheta),True
+            
         self._iter += 1; self.loss[-1].append(float(loss))
-        print "iter: {:0d}, loss: {:1.4e}, gnorm: {:2.4e}, alpha: {:3.4e}, acc: {:4.4f}"\
-            .format(self._iter, float(loss), np.abs(grad).max(), self.alpha, acc)
+        if acc is not None and disp:
+            print "iter: {:0d}, loss: {:1.4e}, gnorm: {:2.4e}, alpha: {:3.4e}, acc: {:4.4f}"\
+                .format(self._iter, float(loss), np.abs(grad).max(), self.alpha, acc)
+        elif disp:
+            print "iter: {:0d}, loss: {:1.4e}, gnorm: {:2.4e}, alpha: {:3.4e}"\
+                .format(self._iter, float(loss), np.abs(grad).max(), self.alpha)
+                
         self.decay_lr()
         self.draw()
         self.snapshot()
-        return self.dtheta
+        return self.dtheta,False
 
 class RMSP(Solver):
     def initialize(self, theta):
@@ -116,11 +140,11 @@ class RMSP(Solver):
         self.sqgrad = np.zeros_like(theta) + 1e-6
         self.method = "rmsp"
         
-    def update(self, loss, grad, acc):
+    def update(self, loss, grad, acc=None, disp=True):
         self.sqgrad = self.gamma*self.sqgrad + (1-self.gamma)*np.square(grad)
         self.dtheta = self.momentum * self.dtheta - \
                       (1-self.momentum) * self.alpha * grad / np.sqrt(self.sqgrad)
-        return Solver.update(self, loss, grad, acc)
+        return Solver.update(self, loss, grad, acc, disp)
 
 class CG(Solver):
     def initialize(self, theta):
@@ -128,12 +152,19 @@ class CG(Solver):
         self.prev_grad = np.zeros_like(theta)
         self.method = 'cg'
 
-    def update(self, loss, grad, acc):
+    def update(self, loss, grad, acc=None, disp=True):
         dx,dxp = -grad, self.prev_grad
         beta = max(0, dx.dot(dx - dxp) / (dxp.dot(dxp)-1e-10) )
-        self.dtheta = self.alpha*( dx + beta*dxp )
+        self.dtheta = dx + beta*dxp
+        
+        if self.allow_backtrack:
+            self.alpha = backtrack(self.model.func, self.model.theta, self.dtheta, loss, grad)
+            
+        self.dtheta *= self.alpha
         self.prev_grad = dx
-        return Solver.update(self, loss, grad, acc)
+        return Solver.update(self, loss, grad, acc, disp)
+"""
+not yet implemented:
 
 class LBFGS(Solver):
     def initialize(self, theta):
@@ -145,7 +176,8 @@ class LBFGS(Solver):
         for i in range(m):
             q  -= 0
         return Solver.update(self, loss, grad, acc)
-    
+"""
+
 class Model(object):
     def initialize(self, loss, scale):
         self._iter = 0
