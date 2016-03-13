@@ -3,7 +3,7 @@ import numpy as np
 import cgt
 from cgt import nn
 import types
-import cPickle as pickle
+import dill as pickle
 from matplotlib import pyplot as plt
 
 def make_variable(name, shape):
@@ -76,6 +76,12 @@ def backtrack(func, x, dx, f, g, alpha=0.25, beta=0.9, lb=1e-6, ub=1):
     return beta
     
 class Solver(struct):
+    plot_func = None
+    lr_decay = 1
+    lr_step = 10000
+    plot_step = 100
+    fname = None
+    
     def __init__(self, args):
         """
         @param args, a dict containing:
@@ -84,7 +90,7 @@ class Solver(struct):
         etc: plot_step, plot_func, fname, snapstep
         """
         struct.__init__(self, **args)
-        if self.plot_step:
+        if self.plot_func:
             self.plot = plt.figure(); plt.ion(); plt.show(0)
             
     def initialize(self, model):
@@ -101,15 +107,16 @@ class Solver(struct):
             self.alpha = max(self.alpha, self.min_alpha)
             
     def draw(self):
-        if self.plot_step and self._iter % self.plot_step == 0:
-            self.plot.clear()
+        if self._iter % self.plot_step == 0:
             self.loss[-1] = np.mean(self.loss[-1])
-            self.plot_func(range(0,self._iter,self.plot_step), self.loss)
             self.loss.append([])
-            plt.draw()
+            if self.plot_func:
+                self.plot.clear()
+                self.plot_func(range(0,self._iter,self.plot_step), self.loss)
+                plt.draw()
 
     def snapshot(self):
-        if len(self.fname) > 0 and self._iter % self.snap_step == 0:
+        if self.fname and self._iter % self.snap_step == 0:
             self.model.dump(self.fname.format(self._iter),
                             {k:v for k,v in self.items() if type(v) != types.FunctionType and not isinstance(v, Model)})
         
